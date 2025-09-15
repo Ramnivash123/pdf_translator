@@ -49,16 +49,27 @@ def translate_pages(text_list, src='fr', dest='en'):
 # -----------------------------
 # Step 3b: Block-level translation
 # -----------------------------
-def translate_blocks(blocks, src='fr', dest='en'):
-    translator = Translator()
+def translate_blocks(blocks, translator, src='fr', dest='en'):
+    texts = [b[4].strip() for b in blocks if b[4].strip()]
+    if not texts:
+        return [(b[:4], "") for b in blocks]
+
+    try:
+        # batch translate all texts at once
+        translations = translator.translate(texts, src=src, dest=dest)
+        if not isinstance(translations, list):
+            translations = [translations]
+    except Exception as e:
+        print("Translation error:", e)
+        translations = texts  # fallback
+
     translated_blocks = []
+    t_index = 0
     for b in blocks:
         text = b[4].strip()
         if text:
-            try:
-                translated = translator.translate(text, src=src, dest=dest).text
-            except Exception:
-                translated = text  # fallback
+            translated = translations[t_index].text
+            t_index += 1
         else:
             translated = ""
         translated_blocks.append((b[:4], translated))
@@ -88,10 +99,11 @@ def save_text_to_pdf(translated_pages, output_pdf):
 # -----------------------------
 def replace_text_in_pdf(input_pdf, output_pdf, src='fr', dest='en'):
     doc = fitz.open(input_pdf)
+    translator = Translator()  # reuse single instance
 
-    for page in doc:
+    for page_num, page in enumerate(doc):
         blocks = page.get_text("blocks")  # [(x0,y0,x1,y1,text,...)]
-        translated_blocks = translate_blocks(blocks, src, dest)
+        translated_blocks = translate_blocks(blocks, translator, src, dest)
 
         for rect_coords, translated_text in translated_blocks:
             rect = fitz.Rect(rect_coords)
@@ -100,6 +112,8 @@ def replace_text_in_pdf(input_pdf, output_pdf, src='fr', dest='en'):
             # Insert translated text
             page.insert_textbox(rect, translated_text,
                                 fontsize=9, fontname="helv", align=0)
+
+        print(f"Processed page {page_num+1}/{len(doc)}")
 
     doc.save(output_pdf)
     doc.close()
