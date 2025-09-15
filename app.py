@@ -6,7 +6,7 @@ import textwrap
 import fitz  # PyMuPDF
 
 # -----------------------------
-# Step 1: Extract text from PDF
+# Step 1: Extract text per page
 # -----------------------------
 def extract_text_from_pdf(pdf_path):
     text = []
@@ -15,7 +15,7 @@ def extract_text_from_pdf(pdf_path):
             page_text = page.extract_text()
             if page_text:
                 text.append(page_text)
-    return text
+    return text   # list of page strings
 
 # -----------------------------
 # Step 2: Split text into smaller chunks
@@ -32,7 +32,22 @@ def chunk_text(text, max_chars=4000):
     return chunks
 
 # -----------------------------
-# Step 3: Translate text
+# Step 3a: Page-level translation
+# -----------------------------
+def translate_pages(text_list, src='fr', dest='en'):
+    translator = Translator()
+    translated_pages = []
+    for page_text in text_list:
+        chunks = chunk_text(page_text)
+        translated_chunks = []
+        for chunk in chunks:
+            translation = translator.translate(chunk, src=src, dest=dest)
+            translated_chunks.append(translation.text)
+        translated_pages.append(" ".join(translated_chunks))
+    return translated_pages
+
+# -----------------------------
+# Step 3b: Block-level translation
 # -----------------------------
 def translate_blocks(blocks, src='fr', dest='en'):
     translator = Translator()
@@ -73,43 +88,40 @@ def save_text_to_pdf(translated_pages, output_pdf):
 # -----------------------------
 def replace_text_in_pdf(input_pdf, output_pdf, src='fr', dest='en'):
     doc = fitz.open(input_pdf)
-    translator = Translator()
 
     for page in doc:
-        blocks = page.get_text("blocks")  # (x0,y0,x1,y1,text,...)
-
-        # Translate each block individually
+        blocks = page.get_text("blocks")  # [(x0,y0,x1,y1,text,...)]
         translated_blocks = translate_blocks(blocks, src, dest)
 
         for rect_coords, translated_text in translated_blocks:
             rect = fitz.Rect(rect_coords)
-            # cover old text
+            # Cover old text with white rectangle
             page.draw_rect(rect, color=(1,1,1), fill=(1,1,1))
-            # insert translated text
+            # Insert translated text
             page.insert_textbox(rect, translated_text,
                                 fontsize=9, fontname="helv", align=0)
+
     doc.save(output_pdf)
     doc.close()
-
 
 # -----------------------------
 # Step 6: Run workflow
 # -----------------------------
 input_pdf = "1_LATEST STRUCT UPTO (DIR S-03).pdf"
-output_pdf = "english_document.pdf"
-replaced_pdf = "replaced.pdf"
+output_pdf = "english_document.pdf"  # plain translated text
+replaced_pdf = "replaced.pdf"        # layout-preserved translation
 
 print("Extracting text...")
 pages_text = extract_text_from_pdf(input_pdf)
 
-print("Translating (this may take a while)...")
-translated_pages = translate_blocks(pages_text)
+print("Translating full pages...")
+translated_pages = translate_pages(pages_text)
 
 print("Saving translated-only PDF...")
 save_text_to_pdf(translated_pages, output_pdf)
 
 print("Replacing text in original layout...")
-replace_text_in_pdf(input_pdf, translated_pages, replaced_pdf)
+replace_text_in_pdf(input_pdf, replaced_pdf)
 
 print("Done! Files created:")
 print(" - English translation PDF:", output_pdf)
