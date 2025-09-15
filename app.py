@@ -6,7 +6,7 @@ import textwrap
 import fitz  # PyMuPDF
 
 # -----------------------------
-# Step 1: Extract text per page
+# Step 1: Extract text from PDF
 # -----------------------------
 def extract_text_from_pdf(pdf_path):
     text = []
@@ -15,7 +15,7 @@ def extract_text_from_pdf(pdf_path):
             page_text = page.extract_text()
             if page_text:
                 text.append(page_text)
-    return text   # list of page strings
+    return text
 
 # -----------------------------
 # Step 2: Split text into smaller chunks
@@ -32,11 +32,12 @@ def chunk_text(text, max_chars=4000):
     return chunks
 
 # -----------------------------
-# Step 3a: Page-level translation
+# Step 3: Translate text
 # -----------------------------
-def translate_pages(text_list, src='fr', dest='en'):
+def translate_text(text_list, src='fr', dest='en'):
     translator = Translator()
     translated_pages = []
+
     for page_text in text_list:
         chunks = chunk_text(page_text)
         translated_chunks = []
@@ -45,35 +46,6 @@ def translate_pages(text_list, src='fr', dest='en'):
             translated_chunks.append(translation.text)
         translated_pages.append(" ".join(translated_chunks))
     return translated_pages
-
-# -----------------------------
-# Step 3b: Block-level translation
-# -----------------------------
-def translate_blocks(blocks, translator, src='fr', dest='en'):
-    texts = [b[4].strip() for b in blocks if b[4].strip()]
-    if not texts:
-        return [(b[:4], "") for b in blocks]
-
-    try:
-        # batch translate all texts at once
-        translations = translator.translate(texts, src=src, dest=dest)
-        if not isinstance(translations, list):
-            translations = [translations]
-    except Exception as e:
-        print("Translation error:", e)
-        translations = texts  # fallback
-
-    translated_blocks = []
-    t_index = 0
-    for b in blocks:
-        text = b[4].strip()
-        if text:
-            translated = translations[t_index].text
-            t_index += 1
-        else:
-            translated = ""
-        translated_blocks.append((b[:4], translated))
-    return translated_blocks
 
 # -----------------------------
 # Step 4: Save translated text to NEW PDF
@@ -97,45 +69,36 @@ def save_text_to_pdf(translated_pages, output_pdf):
 # -----------------------------
 # Step 5: Replace text in original layout
 # -----------------------------
-def replace_text_in_pdf(input_pdf, output_pdf, src='fr', dest='en'):
+def replace_text_in_pdf(input_pdf, translated_pages, output_pdf):
     doc = fitz.open(input_pdf)
-    translator = Translator()  # reuse single instance
-
     for page_num, page in enumerate(doc):
-        blocks = page.get_text("blocks")  # [(x0,y0,x1,y1,text,...)]
-        translated_blocks = translate_blocks(blocks, translator, src, dest)
-
-        for rect_coords, translated_text in translated_blocks:
-            rect = fitz.Rect(rect_coords)
-            # Cover old text with white rectangle
-            page.draw_rect(rect, color=(1,1,1), fill=(1,1,1))
-            # Insert translated text
-            page.insert_textbox(rect, translated_text,
-                                fontsize=9, fontname="helv", align=0)
-
-        print(f"Processed page {page_num+1}/{len(doc)}")
-
+        if page_num < len(translated_pages):
+            page_text = translated_pages[page_num]
+            # Remove old text visually
+            page.clean_contents()
+            # Write translated text over original
+            rect = page.rect
+            page.insert_textbox(rect, page_text, fontsize=10, fontname="helv")
     doc.save(output_pdf)
-    doc.close()
 
 # -----------------------------
 # Step 6: Run workflow
 # -----------------------------
 input_pdf = "1_LATEST STRUCT UPTO (DIR S-03).pdf"
-output_pdf = "english_document.pdf"  # plain translated text
-replaced_pdf = "replaced.pdf"        # layout-preserved translation
+output_pdf = "english_document.pdf"
+replaced_pdf = "replaced.pdf"
 
 print("Extracting text...")
 pages_text = extract_text_from_pdf(input_pdf)
 
-print("Translating full pages...")
-translated_pages = translate_pages(pages_text)
+print("Translating (this may take a while)...")
+translated_pages = translate_text(pages_text)
 
 print("Saving translated-only PDF...")
 save_text_to_pdf(translated_pages, output_pdf)
 
 print("Replacing text in original layout...")
-replace_text_in_pdf(input_pdf, replaced_pdf)
+replace_text_in_pdf(input_pdf, translated_pages, replaced_pdf)
 
 print("Done! Files created:")
 print(" - English translation PDF:", output_pdf)
